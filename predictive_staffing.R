@@ -1,33 +1,33 @@
-# Goal: plot staffings needs probabilistically in time via info from BD efforts
-# Incoming data: p(win), staffing needs by type, start and end dates
-# Plots: Staffing needs (and haves) by type, and totals.
+#!/usr/bin/env Rscript
 
-# Make up data; handle API later
-# Each row has effort name, pwin, and counts of staff needed, and dates (dates suck).
-# Output needs to be at the monthly level
+require(docopt)
+'Usage: predictive_staffing.R <bids_file_pointer> <contracts_file_pointer> <outdir_for_plots>
 
-#                                             j.eng, s.eng, j.ds, s.ds, fse, pm
-raw <- c(
-  "Effort1", "10/1/2019", "10/1/2021", 0.3,    1,    1,      0,    0,   2,    .5, 
-  "Effort2", "12/1/2019", "12/1/2022", 0.2,    1,    1,      2,    .5,  1,    .5,
-  "Effort3", "3/1/2020",   "3/1/2021", 0.5,    0,    .5,     1,    0.3, 1,     0,
-  "Effort4", "5/1/2020",   "5/1/2023", .8,     2,    1,      1,     .5, 2,     .5,
-  "Effort5",  "11/1/2019", "11/1/2020", .3,    1,    0,      .33,   .33, 1,    0)
+]' -> doc
 
-rm <- matrix(raw, nrow=5, byrow=T)
+opts <- docopt(doc)
 
-dat <- data.frame(rm, stringsAsFactors = F)
-colnames(dat) <- c("Effort", "StartDate", "EndDate", "pwin", "jeng", "seng", "jds", "sds", "fse", "pm")
-#seq(from=as.Date(dat$StartDate[1]), to=as.Date(dat$EndDate[1]), by="month")
+d1 <- read.delim(file=opts$bids_file_pointer, sep=",", stringsAsFactors=F)
+d2 <- read.delim(file=opts$contracts_file_pointer, sep=",", stringsAsFactors=F)
 
+#d1 <- read.delim(file="~/Documents/personal/gits/predictive_staffing/bids.csv", sep=",", stringsAsFactors=F)
+#d2 <- read.delim(file="~/Documents/personal/gits/predictive_staffing/current.csv", sep=",", stringsAsFactors=F)
+
+dat <- rbind(d1, d2)
+
+colnames(dat)[1:4] <- c("Effort", "StartDate", "EndDate", "pwin")
+
+numStaffTypes <- ncol(dat) - 4
+
+today <- as.Date(format(Sys.Date(),"%m/1/%Y"), format = "%m/%d/%Y")
 starts <- as.Date(dat$StartDate, format = "%m/%d/%Y")
 ends <- as.Date(dat$EndDate, format = "%m/%d/%Y")
 
-all_months <- seq(from=min(starts), to=max(ends), by="month")
-all_jobs <- c("jeng", "seng", "jds", "sds", "fse", "pm")
+all_months <- seq(from=today, to=max(ends), by="month")
+all_jobs <- colnames(dat)[5:ncol(dat)]
 
-# need an array of month X effort X type
-# this let's us sample from efforts, index by month, and get info per type (and totals)
+# make an array of month X effort X type
+# this lets us sample from efforts, index by month, and get info per staff type (and totals)
 main  <- array(data = 0, dim=c(length(all_months), nrow(dat), length(colnames(dat[5:ncol(dat)]))))
 
 for (e in 1:nrow(dat)){   # e in efforts
@@ -52,7 +52,7 @@ for (e in 1:nrow(dat)){   # e in efforts
 sub <- apply(main, c(1,2), sum) # month by effort
 sims <- matrix(0, nrow=nrow(sub), ncol=100)
 for(i in 1:100){
-  win_vec <- matrix(0, nrow=5, ncol=1)
+  win_vec <- matrix(0, nrow=nrow(dat), ncol=1)
   for(e in 1:ncol(sub)){
     win_vec[e,1] <- rbinom(1, 1, as.numeric(dat[e,"pwin"]))
   }
@@ -66,14 +66,24 @@ med <- apply(sims, 1, function(x) quantile(x, probs=c(0.5)))
 five <- apply(sims, 1, function(x) quantile(x, probs=c(0.05)))
 ninetyfive <- apply(sims, 1, function(x) quantile(x, probs=c(0.95)))
 
+file_handle <- paste(opts$outdir_for_plots, "_totals.pdf", sep="")
+pdf(file=file_handle, width=7, height=5)
+
 plot(all_months, med, type="l",
      ylim=c(min(five), max(ninetyfive)),
      xlab="Timeframe", ylab="Projected Total Staffing",
      main="Projected Staffing over Time")
 points(all_months, five, col="red", type="l")  
 points(all_months, ninetyfive, col="green", type="l")
-  
-# Ok, now we are going to make simultations FOR EACH LCAT/job.
+
+legend("topright",
+       legend=c("95th percentile", "Median", "5th percentile"),
+       col=c("green", "black", "red"),
+       lty=1, lwd=c(2,2,2))
+
+dev.off()
+
+# make simultations for each staffing type
 # So, we aggregate main (effort-month-job)
 # Main is [effort, month, job-type]
 
@@ -81,7 +91,7 @@ for (j in 1:length(all_jobs)){
   sub <- main[,,j]
   sims <- matrix(0, nrow=nrow(sub), ncol=100)
   for(i in 1:100){
-    win_vec <- matrix(0, nrow=5, ncol=1)
+    win_vec <- matrix(0, nrow=nrow(dat), ncol=1)
     for(e in 1:ncol(sub)){
       win_vec[e,1] <- rbinom(1, 1, as.numeric(dat[e,"pwin"]))
     }
@@ -92,14 +102,22 @@ for (j in 1:length(all_jobs)){
   five <- apply(sims, 1, function(x) quantile(x, probs=c(0.05)))
   ninetyfive <- apply(sims, 1, function(x) quantile(x, probs=c(0.95)))
   # plot
+  file_handle <- paste(opts$outdir_for_plots, "_", all_jobs[j], ".pdf", sep="")
+  pdf(file=file_handle, width=7, height=5)
   plot(all_months, med, type="l",
        ylim=c(min(five), max(ninetyfive)),
        xlab="Timeframe", ylab="Projected Staffing",
        main=paste("Projected Staffing:", all_jobs[j], sep=" "))
   points(all_months, five, col="red", type="l")  
   points(all_months, ninetyfive, col="green", type="l")
+  legend("topright",
+         legend=c("95th percentile", "Median", "5th percentile"),
+         col=c("green", "black", "red"),
+         lty=1, lwd=c(2,2,2))
+  dev.off()
 }
-  
+
+
 
 
 

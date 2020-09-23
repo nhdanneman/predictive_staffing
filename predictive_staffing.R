@@ -13,6 +13,8 @@ d2 <- read.delim(file=opts$contracts_file_pointer, sep=",", stringsAsFactors=F)
 #d1 <- read.delim(file="~/Documents/personal/gits/predictive_staffing/bids.csv", sep=",", stringsAsFactors=F)
 #d2 <- read.delim(file="~/Documents/personal/gits/predictive_staffing/current.csv", sep=",", stringsAsFactors=F)
 
+# TODO: make it so that the current contracts csv need not have a pwin column
+
 dat <- rbind(d1, d2)
 
 colnames(dat)[1:4] <- c("Effort", "StartDate", "EndDate", "pwin")
